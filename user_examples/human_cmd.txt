@@ -1,0 +1,11 @@
+# Make sure to turn off `NavMesh Based Navigation` feature.
+
+#Spawns a character at the given position and rotation.
+Spawn male_adult_construction_01_new -5 13 0 0
+
+#GoTo moves the character to a location. GoTo can be followed by a single point or a sequence of points
+#LookAround makes the character stand in the same spot, while moving its head from left to right.
+male_adult_construction_01_new GoTo -5 10 0 -5 6 0 _
+male_adult_construction_01_new LookAround 1
+male_adult_construction_01_new GoTo -5 -1 0 _
+male_adult_construction_01_new LookAround 1
