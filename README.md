@@ -22,6 +22,8 @@ rm -rf user_examples/
 git clone https://github.com/fdcl-gwu/isaac-hrc.git
 # Move the cloned 'user_examples' folder out of 'isaac-hrc' into the current 'examples' directory
 mv ./isaac-hrc/user_examples/ ./user_examples
+# Move the cloned 'human_cmd.txt' into the 'Downloads' folder
+mv ./user_examples/human_cmd.txt ~/Downloads
 
 #------ Running Isaac Sim ------#
 # Navigate back to Isaac Sim root directory

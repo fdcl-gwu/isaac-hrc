@@ -29,7 +29,7 @@ class Crazyflie(Robot):
 
         # Dynamically construct the asset path
         home_dir = os.path.expanduser("~")
-        asset_dir = os.path.join(home_dir, "isaacsim_4_2/exts/omni.isaac.examples/omni/isaac/examples/user_examples/asset")
+        asset_dir = os.path.join(home_dir, "isaacsim/exts/omni.isaac.examples/omni/isaac/examples/user_examples/asset")
         asset_path = os.path.join(asset_dir, "cf2x_largex7.usd")
 
         # Ensure the file exists before adding it to the stage
@@ -37,18 +37,6 @@ class Crazyflie(Robot):
             carb.log_error(f"Asset file not found: {asset_path}")
         else:
             add_reference_to_stage(asset_path, prim_path)
-
-        """
-        if self._usd_path is None:
-            assets_root_path = get_assets_root_path()
-            if assets_root_path is None:
-                carb.log_error("Could not find Isaac Sim assets folder")
-            self._usd_path = assets_root_path + "/Isaac/Robots/Crazyflie/cf2x.usd"
-        add_reference_to_stage(self._usd_path, prim_path)
-        """
-
-        # asset_path = "C:/Users/Vicon-OEM/Downloads/cf2x_largex7.usd"
-        # add_reference_to_stage(asset_path, prim_path)
 
         super().__init__(prim_path=prim_path, name=name, position=position, orientation=orientation, scale=scale)
 

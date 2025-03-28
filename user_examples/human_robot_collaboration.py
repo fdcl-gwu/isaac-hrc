@@ -17,8 +17,8 @@ from omni.isaac.wheeled_robots.controllers.differential_controller import Differ
 
 # Construct the absolute path dynamically
 home_dir = os.path.expanduser("~")  # Get home directory
-isaacsim_path = os.path.join(home_dir, "isaacsim_4_2/exts/omni.isaac.examples/omni/isaac/examples/user_examples")
-asset_dir = os.path.join(home_dir, "isaacsim_4_2/exts/omni.isaac.examples/omni/isaac/examples/user_examples/asset")
+isaacsim_path = os.path.join(home_dir, "isaacsim/exts/omni.isaac.examples/omni/isaac/examples/user_examples")
+asset_dir = os.path.join(home_dir, "isaacsim/exts/omni.isaac.examples/omni/isaac/examples/user_examples/asset")
 # Add to sys.path if not already present
 if isaacsim_path not in sys.path:
     sys.path.append(isaacsim_path)
