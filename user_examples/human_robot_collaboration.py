@@ -15,17 +15,19 @@ from omni.isaac.wheeled_robots.controllers import WheelBasePoseController
 from omni.isaac.wheeled_robots.controllers.holonomic_controller import HolonomicController
 from omni.isaac.wheeled_robots.controllers.differential_controller import DifferentialController
 
-# Construct the absolute path dynamically
-home_dir = os.path.expanduser("~")  # Get home directory
+# Dynamically define paths for Isaac Sim and custom assets
+home_dir = os.path.expanduser("~")  # User's home directory
 isaacsim_path = os.path.join(home_dir, "isaacsim/exts/omni.isaac.examples/omni/isaac/examples/user_examples")
-asset_dir = os.path.join(home_dir, "isaacsim/exts/omni.isaac.examples/omni/isaac/examples/user_examples/asset")
-# Add to sys.path if not already present
+asset_dir = os.path.join(isaacsim_path, "asset")
+
+# Append to Python path for module imports
 if isaacsim_path not in sys.path:
     sys.path.append(isaacsim_path)
 
 from crazyflie import Crazyflie, CrazyflieView, hat, vee, deriv_unit_vector, ensure_SO3, IntegralErrorVec3
 from crazyflie import quaternion_to_rotation_matrix, quat_rotate_inverse, q_to_R
 
+# Define paths for all necessary simulation assets (warehouse, robots, fire, etc.)
 class Assets:
     def __init__(self):        
         self.background_asset_path = os.path.join(asset_dir, "warehouse_wall.usd")
@@ -36,27 +38,29 @@ class Assets:
         self.yellow_safety_helmet_man_asset_path = os.path.join(asset_dir, "yellow_safety_helmet_man.usd")
         self.red_safety_helmet_man_asset_path = os.path.join(asset_dir, "red_safety_helmet_man.usd")
 
+# Main class handling setup, robot definitions, controllers, and physics interactions
 class HumanRobotCollaboration(BaseSample):
     def __init__(self) -> None:
         super().__init__()
-        self.g = 9.81 # standard gravity
-        self.dt = 1/60 # 60 Hz by default
+        # Physics and timing setup
+        self.g = 9.81  # Standard gravity
+        self.dt = 1/60  # Simulation time step; 60 Hz by default
 
-        #------ UGVs' properties ------#
-        self.scale_jetbot = 4
+        # UGV (Jetbot) properties
+        self.scale_jetbot = 4  # Scale factor for Jetbot's model size
  
-        #------ UAVs' properties ------# 
-        self._num_envs = 1
-        self.crazyflie_x0 = np.array([-7., 13., 2.])
-        self.scale_uav = 6
-        self.m_uav = (0.025 + 4*0.0008)*self.scale_uav
-        self.d = 0.0438*self.scale_uav
-        self.J = np.diag([1.4e-5, 1.4e-5, 2.17e-5])*self.scale_uav # inertia matrix of quad, [kg m2]
-        self.c_tf = 0.0135 # torque-to-thrust coefficients
-        self.c_tw = 2.25 # thrust-to-weight coefficients
-        self.hover_force = self.m_uav * self.g / 4.0 # thrust magnitude of each motor, [N]
-        self.min_force = -0.005 # minimum thrust of each motor, [N]
-        self.max_force = self.c_tw * self.hover_force # maximum thrust of each motor, [N]
+        # UAV (Crazyflie) properties and physical parameters
+        self._num_envs = 1  # Number of UAVs
+        self.crazyflie_x0 = np.array([-7., 13., 2.])  # Crazyflie's init position
+        self.scale_uav = 6  # UAV scale factor
+        self.m_uav = (0.025 + 4*0.0008)*self.scale_uav  # UAV mass
+        self.d = 0.0438*self.scale_uav  # Rotor-arm distance
+        self.J = np.diag([1.4e-5, 1.4e-5, 2.17e-5])*self.scale_uav  # Inertia matrix of quad, [kg m2]
+        self.c_tf = 0.0135  # Torque-to-thrust coefficients
+        self.c_tw = 2.25  # Thrust-to-weight coefficients
+        self.hover_force = self.m_uav * self.g / 4.0  # Thrust magnitude of each motor, [N]
+        self.min_force = -0.005  # Minimum thrust of each motor, [N]
+        self.max_force = self.c_tw * self.hover_force  # Maximum thrust of each motor, [N]
         self.prop_max_rot = 433.3
         self.motor_assymetry = np.array([1.0, 1.0, 1.0, 1.0])
         self.motor_assymetry = self.motor_assymetry * 4.0 / np.sum(self.motor_assymetry) # re-normalizing to sum-up to 4
@@ -86,50 +90,45 @@ class HumanRobotCollaboration(BaseSample):
             [0., sin(pi), cos(pi)]
         ]) # Transformation from Isaac-local-body frame(ENU) to the FDCL-body frame(NED).
  
-        #---- PD control gains ----#
+        # PID control gains
         self.kX = 2.2*np.diag([0.4, 0.4, 1.25]) # position gains
         self.kV = 2.2*np.diag([0.2, 0.2, 0.5]) # velocity gains 
         self.kX[2,2] = 0.4
         self.kR = 0.2*np.diag([1.5, 1.5, 1.2]) # attitude gains 
         self.kW = 0.2*np.diag([0.5, 0.5, 0.3]) # angular velocity gains 
-
-        #---- Integral control ----#
+        # Integral control
         self.use_integral = False
+        self.kIX = 0.5*np.diag([1.0, 1.0, 1.4])   # Position integral gains
+        self.kIR = 0.05*np.diag([1.0, 1.0, 0.7]) # Attitude integral gain
         self.sat_sigma = 3.5
         self.eIX = IntegralErrorVec3() # Position integral error
         self.eIR = IntegralErrorVec3() # Attitude integral error
         self.eIX.set_zero() # Set all integrals to zero
         self.eIR.set_zero()
-        #---- I control gains ----#
-        self.kIX = 0.5*np.diag([1.0, 1.0, 1.4])   # Position integral gains
-        self.kIR = 0.05*np.diag([1.0, 1.0, 0.7]) # Attitude integral gain
 
-        #---- Geometric tracking traj ----#
+        # Geometric tracking trajectory
         self.xd, self.vd, self.Wd = np.zeros(3), np.zeros(3), np.zeros(3)
-        self.b1d = np.array([1.,0.,0.]) # desired heading direction
+        self.b1d = np.array([1.,0.,0.])  # desired heading direction
         self.xd_2dot, self.xd_3dot, self.xd_4dot = np.zeros(3), np.zeros(3), np.zeros(3)
         self.b1d_dot, self.b1d_2dot = np.zeros(3), np.zeros(3)
-        self.is_realtime = False # if False, it is sim_time
         self.trajectory_started = False
-        self.t0 = 0.
-        self.t = 0.
-        self.t_traj = 0.
+        self.t0, self.t, self.t_traj = 0., 0., 0.
 
-        #---- Mission flags ----#
-        self.crazyflie_done = False
+        # Waypoints and motion control flags 
+        self.crazyflie_done, self.jetbot_done = False, False
+        self.waypoint_crazyflie_index, self.waypoint_jetbot_index = 0, 0
+        # Desired waypoints for crazyflie
         waypoints_crazyflie = np.array([
             np.array([-7., 12., self.crazyflie_x0[2]]),
             np.array([-7., 6., self.crazyflie_x0[2]]),
-            # np.array([-7., -1., self.crazyflie_x0[2]]),
-            # np.array([-1., -1., self.crazyflie_x0[2]]),
+            np.array([-7., -1., self.crazyflie_x0[2]]),
+            np.array([-1., -1., self.crazyflie_x0[2]]),
             # np.array([-1., 2., self.crazyflie_x0[2]]),
             # np.array([-1., 5., self.crazyflie_x0[2]]),
         ])
-        self.waypoint_crazyflie_index = 0
         self.interpolated_waypoints_crazyflie = self.interpolate_waypoints(waypoints_crazyflie, 
                                                                            num_intermediate_points=100) # smoothed_waypoints
-
-        self.jetbot_done = False
+        # Desired waypoints for jetbot
         waypoints_jetbot = np.array([
             np.array([-7., 12., 0.134]),
             np.array([-7., 6., 0.134]),
@@ -137,7 +136,6 @@ class HumanRobotCollaboration(BaseSample):
             np.array([-1., -1., 0.134]), 
             # np.array([-1., 2., 0.134]), 
         ])
-        self.waypoint_jetbot_index = 0
         self.interpolated_waypoints_jetbot = self.interpolate_waypoints(waypoints_jetbot, 
                                                                         num_intermediate_points=100) # smoothed_waypoints
 
@@ -148,7 +146,8 @@ class HumanRobotCollaboration(BaseSample):
     # after a hot-reload, its only called to load the world starting from an EMPTY stage
     def setup_scene(self):
         world = self.get_world()
-        #------ Add Warehouse Background ------#
+
+        # Add warehouse background asset in the scene
         assets = Assets()
         add_reference_to_stage(usd_path=assets.background_asset_path, prim_path="/World/Background")
         background_prim = XFormPrim(
@@ -157,42 +156,9 @@ class HumanRobotCollaboration(BaseSample):
             # orientation=[0.7071, 0, 0, 0.7071]
         )
 
-        add_reference_to_stage(usd_path=assets.smoke_asset_path, prim_path="/World/Flow/Smoke")
-        smoke_scene = world.scene.add(
-            XFormPrim(
-                prim_path="/World/Flow/Smoke", # The prim path of the object in the USD stage
-                name="smoke",
-                position=[-5, 3., -1.],
-                # scale=[0.1, 0.1, 0.1],
-                ))
-        
-        add_reference_to_stage(usd_path=assets.fire_asset_path, prim_path="/World/Flow/Fire")
-        fire_scene = world.scene.add(
-            XFormPrim(
-                prim_path="/World/Flow/Fire", # The prim path of the object in the USD stage
-                name="fire",
-                position=[2.5, 3.6, 0.],
-                # scale=[0.1, 0.1, 0.1],
-                ))
-        add_reference_to_stage(usd_path=assets.fire_source_asset_path, prim_path="/World/Flow/FireSource")
-        fire_source_scene = world.scene.add(
-            XFormPrim(
-                prim_path="/World/Flow/FireSource", # The prim path of the object in the USD stage
-                name="fire_source",
-                position=[2.5, 3.6, 0.5],
-                # scale=[0.1, 0.1, 0.1], 
-                # orientation=np.array([1., 1., 0., 0.]),
-                ))
-
-
-        #------ Add UGVs ------# 
+        # Add jetbot asset in the scene
         # This will create a new XFormPrim and point it to the usd file as a reference
-        # Similar to how pointers work in memory
         add_reference_to_stage(usd_path=assets.jetbot_asset_path, prim_path="/World/UGVs/Jetbot")
-        # Wrap the Crazyflie prim root under a Robot class and add it to the Scene to use high level api 
-        # to set/ get attributes as well as initializing physics handles needed..etc.
-        # Note: this call doesn't create the Crazyflie in the stage window, 
-        # it was already created with the add_reference_to_stage
         jetbot_robot = world.scene.add(
             Robot(
                 prim_path="/World/UGVs/Jetbot", # The prim path of the object in the USD stage
@@ -201,12 +167,8 @@ class HumanRobotCollaboration(BaseSample):
                 orientation=np.array([0.66262, 0.0, 0.0, -0.74896]),
                 scale=self.scale_jetbot*np.ones(3) # most arguments accept mainly numpy arrays.
                 ))
-        # Note: before a reset is called, we can't access information related to an Articulation
-        # because physics handles are not initialized yet. 
-        # setup_post_load is called after the first reset so we can do so there
-        # print("Num of degrees of freedom before first reset: " + str(crazy_flie.num_dof)) # prints None
-
-        #------ Add UAVs ------#
+ 
+        # Add crazyflie asset in the scene
         self.default_zero_env_path = "/World/UAVs/UAV_0"
         crazyflie = Crazyflie(
             prim_path=self.default_zero_env_path + "/Crazyflie", # The prim path of the object in the USD stage
@@ -221,7 +183,34 @@ class HumanRobotCollaboration(BaseSample):
         for i in range(4):
             self._world.scene.add(self._crazyflie.physics_rotors[i])
 
-        #------ Add People ------# 
+        # Add smoke asset in the scene
+        add_reference_to_stage(usd_path=assets.smoke_asset_path, prim_path="/World/Flow/Smoke")
+        smoke_scene = world.scene.add(
+            XFormPrim(
+                prim_path="/World/Flow/Smoke", # The prim path of the object in the USD stage
+                name="smoke",
+                position=[-5, 3., -1.],
+                ))
+        
+        # Add fire and fire source assets in the scene
+        add_reference_to_stage(usd_path=assets.fire_asset_path, prim_path="/World/Flow/Fire")
+        fire_scene = world.scene.add(
+            XFormPrim(
+                prim_path="/World/Flow/Fire", # The prim path of the object in the USD stage
+                name="fire",
+                position=[2.5, 3.6, 0.],
+                ))
+        add_reference_to_stage(usd_path=assets.fire_source_asset_path, prim_path="/World/Flow/FireSource")
+        fire_source_scene = world.scene.add(
+            XFormPrim(
+                prim_path="/World/Flow/FireSource", # The prim path of the object in the USD stage
+                name="fire_source",
+                position=[2.5, 3.6, 0.5],
+                # scale=[0.1, 0.1, 0.1], 
+                # orientation=np.array([1., 1., 0., 0.]),
+                ))
+
+        # Add people assets in the scene
         add_reference_to_stage(usd_path=assets.yellow_safety_helmet_man_asset_path, prim_path="/World/People/yellow_safety_helmet_man")
         yellow_safety_helmet_man_scene = world.scene.add(
             XFormPrim(
@@ -244,7 +233,7 @@ class HumanRobotCollaboration(BaseSample):
     async def setup_post_load(self):
         self._world = self.get_world()
  
-        #------ Load UGVs and define its controller ------# 
+        # Load UGVs and define its controller
         self._jetbot = self._world.scene.get_object("jetbot")
         # print("Num of degrees of freedom of UGV: " + str(self._jetbot.num_dof)) # prints 2
         # print("Joint Positions and Velocities of UGV: " + str(self._jetbot.get_joint_positions()) + ","
@@ -258,12 +247,12 @@ class HumanRobotCollaboration(BaseSample):
                                                                                   wheel_base=0.1125*self.scale_jetbot),
                                                            is_holonomic=False) # self.scale_jetbot
  
-        #------ Load people ------# 
+        # Load people
         self._yellow_safety_helmet_man = self._world.scene.get_object("yellow_safety_helmet_man")
         self._red_safety_helmet_man = self._world.scene.get_object("red_safety_helmet_man")
         
-        #------ Add a physics callback ------# 
-        # In order to send the actions to apply actions with every physics step executed.
+        # Add a physics callback
+        # In order to send the actions to apply actions with every physics step executed
         self._world.add_physics_callback("sending_actions", callback_fn=self.physics_step)
 
         return
@@ -280,17 +269,18 @@ class HumanRobotCollaboration(BaseSample):
     def physics_step(self, step_size): 
         #''' apply actions to crazyflie '''
         crazyflie_position, crazyflie_orientation = self.get_crazyflie_obs()
+        self.crazyflie_done = self.fly_to_waypoints(crazyflie_position, crazyflie_orientation, self.interpolated_waypoints_crazyflie)
         # goal_position = np.array([1.0, -1.0, 1.5])
         # goal_yaw_angle = 0.
         # self.fly_to(crazyflie_position, crazyflie_orientation, goal_position, goal_yaw_angle)
-        self.crazyflie_done = self.fly_to_waypoints(crazyflie_position, crazyflie_orientation, self.interpolated_waypoints_crazyflie)
         
-        if self.crazyflie_done == True: # When the UAV finishes scanning 
+        # When the UAV finishes scanning:
+        if self.crazyflie_done == True: 
             # ''' apply actions to jetbot ''' 
             jetbot_position, jetbot_orientation = self.get_jetbot_obs()
+            self.jetbot_done = self.go_to_waypoints(jetbot_position, jetbot_orientation, self.interpolated_waypoints_jetbot)
             # goal_position, _ = self.get_yellow_safety_helmet_man_obs()
             # self.go_to(jetbot_position, jetbot_orientation, goal_position)
-            self.jetbot_done = self.go_to_waypoints(jetbot_position, jetbot_orientation, self.interpolated_waypoints_jetbot)
         return
        
     def get_jetbot_obs(self):
@@ -414,13 +404,13 @@ class HumanRobotCollaboration(BaseSample):
         return np.array(interpolated_waypoints)
 
     def geometric_controller(self, crazyflie_position, crazyflie_orientation, goal_position, goal_yaw_direction):
-        #---- States ----#
+        # States
         x_w = crazyflie_position # Pos in Isaac-world-fixed frame(ENU)
         v_w = self._crazyflie.get_velocities(clone=False)[:, :3][0] # Vel in Isaac-world-fixed frame(ENU) 
         R_wl = ensure_SO3(quaternion_to_rotation_matrix(crazyflie_orientation)) # Isaac-local-body frame(ENU) to Isaac-world-fixed frame(ENU)
         W_l = self._crazyflie.get_velocities(clone=False)[:, 3:][0] # Ang Vel in Isaac-world-local frame(ENU)
         W_l = R_wl.T@W_l
-        #---- Desired commands ----#
+        # Desired commands
         xd_w = goal_position # Goal Pos in Isaac-world-fixed frame(ENU)
         vd_w = self.vd
         xd_2dot_w = self.xd_2dot 
@@ -453,19 +443,19 @@ class HumanRobotCollaboration(BaseSample):
         R_T = R_fb.T
         hatW = hat(W_b)
 
-        #---- Position control ----#
+        # Position control
         # Translational error functions
         eX = x_f - xd_f # position tracking errors 
         eV = v_f - vd_f # velocity tracking errors 
         
-        #---- Position integral terms
+        # Position integral terms
         if self.use_integral:
             self.eIX.integrate(eX + eV, self.dt) 
             self.eIX.error = np.clip(self.eIX.error, -self.sat_sigma, self.sat_sigma)
         else:
             self.eIX.set_zero()
 
-        #---- Force 'f' along negative b3-axis ----#
+        # Force 'f' along negative b3-axis
         # This term equals to R_fb.e3
         A = - self.kX@eX \
             - self.kV@eV \
@@ -478,7 +468,7 @@ class HumanRobotCollaboration(BaseSample):
         b3_dot = R_fb@hatW@e3
         f_total = -A@b3
 
-        #---- Intermediate terms for rotational errors ----#
+        # Intermediate terms for rotational errors
         ea = self.g*e3 \
             - f_total/self.m_uav*b3 \
             - xd_2dot_f
@@ -529,12 +519,12 @@ class HumanRobotCollaboration(BaseSample):
         hat_Wd = hat(Wd)
         Wd_dot = vee(Rd_T@Rd_2dot - hat_Wd@hat_Wd)
         
-        #---- Attitude control ----#
+        # Attitude control
         RdtR = Rd_T@R_fb
         eR = 0.5*vee(RdtR - RdtR.T) # attitude error vector
         eW = W_b - R_T@Rd@Wd # angular velocity error vector
 
-        #---- Attitude integral terms ----#
+        # Attitude integral terms
         if self.use_integral:
             self.eIR.integrate(eR + eW, self.dt) 
             self.eIR.error = np.clip(self.eIR.error, -self.sat_sigma, self.sat_sigma)
@@ -548,10 +538,10 @@ class HumanRobotCollaboration(BaseSample):
         if self.use_integral:
             M -= self.kIR@self.eIR.error
 
-        #---- Print error terms ----#    
+        # Print error terms    
         # print(f"eX: {eX}, eV: {eV}, eR: {eR}, eW: {eW}")
 
-        #---- Compute the thrust of each motor from the total force and moment ----#
+        # Compute the thrust of each motor from the total force and moment
         f_total = np.clip(f_total, -self.c_tw*self.m_uav*self.g, self.c_tw*self.m_uav*self.g)
         self.fM[0] = f_total
         for i in range(3):

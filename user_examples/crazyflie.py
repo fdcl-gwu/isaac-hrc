@@ -20,10 +20,8 @@ class Crazyflie(Robot):
         usd_path: Optional[str] = None,
         position: Optional[np.ndarray] = None,
         orientation: Optional[np.ndarray] = None,
-        scale: Optional[np.array] = None,
-    ) -> None:
-        """[summary]"""
-
+        scale: Optional[np.array] = None,) -> None:
+        
         self._usd_path = usd_path
         self._name = name
 
@@ -43,24 +41,19 @@ class Crazyflie(Robot):
 
 class CrazyflieView(ArticulationView):
     def __init__(self, prim_paths_expr: str, name: Optional[str] = "CrazyflieView") -> None:
-        """[summary]"""
-
         super().__init__(
             prim_paths_expr=prim_paths_expr,
-            name=name,
-        )
+            name=name,)
 
         self.rigid_body =RigidPrimView(
             prim_paths_expr=f"/World/UAVs/.*/Crazyflie/body", 
             name=f"body_view")
 
-
         self.physics_rotors = [
             RigidPrimView(
                 prim_paths_expr=f"/World/UAVs/.*/Crazyflie/m{i}_prop", 
                 name=f"m{i}_prop_view")
-            for i in range(1, 5)
-        ]
+            for i in range(1, 5)]
 
 
 def hat(x):
