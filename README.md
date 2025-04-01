@@ -1,5 +1,6 @@
 # isaac-hrc
 Human-Robot Collaboration in Isaac Sim
+<img src="docs/img/main.gif" width=95%>
 
 ## Installation
 ```bash
