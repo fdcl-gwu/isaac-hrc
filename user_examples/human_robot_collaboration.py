@@ -6,6 +6,7 @@ import numpy as np
 from numpy import cos, sin, pi, linalg 
 
 from omni.isaac.examples.base_sample import BaseSample
+from omni.isaac.sensor import Camera
 from omni.isaac.core.robots import Robot
 from omni.isaac.core.prims.xform_prim import XFormPrim
 from omni.isaac.core.utils.stage import add_reference_to_stage
@@ -14,6 +15,7 @@ from omni.isaac.wheeled_robots.robots import WheeledRobot
 from omni.isaac.wheeled_robots.controllers import WheelBasePoseController
 from omni.isaac.wheeled_robots.controllers.holonomic_controller import HolonomicController
 from omni.isaac.wheeled_robots.controllers.differential_controller import DifferentialController
+import omni.isaac.core.utils.numpy.rotations as rot_utils
 
 # Dynamically define paths for Isaac Sim and custom assets
 home_dir = os.path.expanduser("~")  # User's home directory
@@ -227,6 +229,17 @@ class HumanRobotCollaboration(BaseSample):
                 position=np.array([6.5, 14.0, .1]), # Using the current stage units which is in meters by default.
                 orientation=np.array([0.67438, -0.67438, 0.21263, -0.21263]),
                 ))
+        
+        # Add human_camera in the scene
+        camera = Camera(
+            prim_path="/World/human_camera",
+            name="human_camera",
+            position=np.array([0.0, 0.0, 1.6]),
+            orientation=rot_utils.euler_angles_to_quats(np.array([0, 0, -90]), degrees=True),
+        )
+        # https://docs.omniverse.nvidia.com/py/isaacsim/source/extensions/omni.isaac.sensor/docs/index.html
+        camera.set_focal_length(1.)
+
 
         return
   
