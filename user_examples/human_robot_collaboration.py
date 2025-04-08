@@ -34,6 +34,7 @@ class Assets:
     def __init__(self):        
         self.background_asset_path = os.path.join(asset_dir, "warehouse_wall.usd")
         self.jetbot_asset_path = os.path.join(asset_dir, "jetbot_largex4.usd")
+        self.jackal_asset_path = os.path.join(asset_dir, "jackal.usd")
         self.fire_asset_path = os.path.join(asset_dir, "fire.usd")
         self.smoke_asset_path = os.path.join(asset_dir, "smoke.usd")
         self.fire_source_asset_path = os.path.join(asset_dir, "fire_source.usd")
@@ -117,8 +118,8 @@ class HumanRobotCollaboration(BaseSample):
         self.t0, self.t, self.t_traj = 0., 0., 0.
 
         # Waypoints and motion control flags 
-        self.crazyflie_done, self.jetbot_done = False, False
-        self.waypoint_crazyflie_index, self.waypoint_jetbot_index = 0, 0
+        self.crazyflie_done, self.jetbot_done, self.jackal_done = False, False, False
+        self.waypoint_crazyflie_index, self.waypoint_jetbot_index, self.waypoint_jackal_index = 0, 0, 0
         # Desired waypoints for crazyflie
         waypoints_crazyflie = np.array([
             np.array([-7., 12., self.crazyflie_x0[2]]),
@@ -139,6 +140,18 @@ class HumanRobotCollaboration(BaseSample):
             # np.array([-1., 2., 0.134]), 
         ])
         self.interpolated_waypoints_jetbot = self.interpolate_waypoints(waypoints_jetbot, 
+                                                                        num_intermediate_points=100) # smoothed_waypoints
+
+        # Desired waypoints for jackal
+        waypoints_jackal = np.array([
+            np.array([-1.5, 1.5, 0.07]),
+            np.array([-1.5, -4.5, 0.07]),
+            np.array([-1.5, 7.5, 0.07]),
+            np.array([-1., 9.35, 0.07]),
+            np.array([0, 9.35, 0.07]), 
+            np.array([6.8, 15.8, 0.07]), 
+        ])
+        self.interpolated_waypoints_jackal = self.interpolate_waypoints(waypoints_jackal, 
                                                                         num_intermediate_points=100) # smoothed_waypoints
 
         return
@@ -169,7 +182,18 @@ class HumanRobotCollaboration(BaseSample):
                 orientation=np.array([0.66262, 0.0, 0.0, -0.74896]),
                 scale=self.scale_jetbot*np.ones(3) # most arguments accept mainly numpy arrays.
                 ))
- 
+        
+        # Add jackal asset in the scene
+        add_reference_to_stage(usd_path=assets.jackal_asset_path, prim_path="/World/UGVs/Jackal")
+        jackal_robot = world.scene.add(
+            Robot(
+                prim_path="/World/UGVs/Jackal", # The prim path of the object in the USD stage
+                name="jackal", # The unique name used to retrieve the object from the scene later on
+                position=np.array([-7.5, 10.5, 0.07]), # Using the current stage units which is in meters by default.
+                orientation=np.array([0.66262, 0.0, 0.0, -0.74896]),
+                scale=np.ones(3) # most arguments accept mainly numpy arrays.
+                ))
+        
         # Add crazyflie asset in the scene
         self.default_zero_env_path = "/World/UAVs/UAV_0"
         crazyflie = Crazyflie(
@@ -246,7 +270,7 @@ class HumanRobotCollaboration(BaseSample):
     async def setup_post_load(self):
         self._world = self.get_world()
  
-        # Load UGVs and define its controller
+        # Load jetbot and define its controller
         self._jetbot = self._world.scene.get_object("jetbot")
         # print("Num of degrees of freedom of UGV: " + str(self._jetbot.num_dof)) # prints 2
         # print("Joint Positions and Velocities of UGV: " + str(self._jetbot.get_joint_positions()) + ","
@@ -258,12 +282,36 @@ class HumanRobotCollaboration(BaseSample):
                                                            DifferentialController(name="jetbot_control", 
                                                                                   wheel_radius=0.03*self.scale_jetbot, 
                                                                                   wheel_base=0.1125*self.scale_jetbot),
-                                                           is_holonomic=False) # self.scale_jetbot
- 
+                                                           is_holonomic=False) 
+        
+        # Load jackal and define its controller
+        self._jackal = self._world.scene.get_object("jackal")
+        wheel_radius = [0.098, 0.098, 0.098, 0.098]
+        wheel_orientations = [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]]
+        wheel_positions = [
+            [-0.131, -0.18779, 0.0345],
+            [-0.131, 0.18779, 0.0345],
+            [0.131, -0.18779, 0.0345],
+            [0.131, 0.18779, 0.0345],
+        ]
+        mecanum_angles = [45, 45, 45, 45]
+        self._jackal_controller  = WheelBasePoseController(name="jackal_controller",
+                                                           open_loop_wheel_controller=
+                                                           HolonomicController(
+                                                                           name="jackal_controller",
+                                                                           wheel_radius=wheel_radius,
+                                                                           wheel_positions=wheel_positions,
+                                                                           wheel_orientations=wheel_orientations,
+                                                                           mecanum_angles=mecanum_angles,
+                                                                           # wheel_axis=wheel_axis,
+                                                                           # up_axis=up_axis
+                                                                           ),
+                                                           is_holonomic=True) 
+                
         # Load people
         self._yellow_safety_helmet_man = self._world.scene.get_object("yellow_safety_helmet_man")
         self._red_safety_helmet_man = self._world.scene.get_object("red_safety_helmet_man")
-        
+
         # Add a physics callback
         # In order to send the actions to apply actions with every physics step executed
         self._world.add_physics_callback("sending_actions", callback_fn=self.physics_step)
@@ -280,20 +328,24 @@ class HumanRobotCollaboration(BaseSample):
         return
 
     def physics_step(self, step_size): 
-        #''' apply actions to crazyflie '''
-        crazyflie_position, crazyflie_orientation = self.get_crazyflie_obs()
-        self.crazyflie_done = self.fly_to_waypoints(crazyflie_position, crazyflie_orientation, self.interpolated_waypoints_crazyflie)
-        # goal_position = np.array([1.0, -1.0, 1.5])
-        # goal_yaw_angle = 0.
-        # self.fly_to(crazyflie_position, crazyflie_orientation, goal_position, goal_yaw_angle)
-        
-        # When the UAV finishes scanning:
-        if self.crazyflie_done == True: 
-            # ''' apply actions to jetbot ''' 
-            jetbot_position, jetbot_orientation = self.get_jetbot_obs()
-            self.jetbot_done = self.go_to_waypoints(jetbot_position, jetbot_orientation, self.interpolated_waypoints_jetbot)
-            # goal_position, _ = self.get_yellow_safety_helmet_man_obs()
-            # self.go_to(jetbot_position, jetbot_orientation, goal_position)
+        ''' apply actions to crazyflie '''
+        # crazyflie_position, crazyflie_orientation = self.get_crazyflie_obs()
+        # self.crazyflie_done = self.fly_to_waypoints(crazyflie_position, crazyflie_orientation, self.interpolated_waypoints_crazyflie)
+        # # goal_position = np.array([1.0, -1.0, 1.5])
+        # # goal_yaw_angle = 0.
+        # # self.fly_to(crazyflie_position, crazyflie_orientation, goal_position, goal_yaw_angle)
+
+        ''' When the UAV finishes scanning '''
+        # if self.crazyflie_done == True: 
+        #     # ''' apply actions to jetbot ''' 
+        #     jetbot_position, jetbot_orientation = self.get_jetbot_obs()
+        #     self.jetbot_done = self.jetbot_go_to_waypoints(jetbot_position, jetbot_orientation, self.interpolated_waypoints_jetbot)
+        #     # goal_position, _ = self.get_yellow_safety_helmet_man_obs()
+        #     # self.go_to(jetbot_position, jetbot_orientation, goal_position)
+
+        ''' apply actions to jackal '''
+        jackal_position, jackal_orientation = self.get_jackal_obs()
+        self.jackal_done = self.jackal_go_to_waypoints(jackal_position, jackal_orientation, self.interpolated_waypoints_jackal)
         return
        
     def get_jetbot_obs(self):
@@ -302,6 +354,12 @@ class HumanRobotCollaboration(BaseSample):
         # print("Jetbot's orientation is : " + str(jetbot_orientation))
         return jetbot_position, jetbot_orientation 
 
+    def get_jackal_obs(self):
+        jackal_position, jackal_orientation = self._jackal.get_world_pose()
+        # print("Jackal's position is : " + str(jackal_position))
+        # print("Jackal's orientation is : " + str(jackal_orientation))
+        return jackal_position, jackal_orientation 
+    
     def get_crazyflie_obs(self):
         crazyflie_position, crazyflie_orientation = self._crazyflie.get_world_poses(clone=False)
         # print("Crazyflie's position is : " + str(crazyflie_position))
@@ -353,8 +411,7 @@ class HumanRobotCollaboration(BaseSample):
          
         return is_done
 
-    def go_to_waypoints(self, jetbot_position, jetbot_orientation, waypoints_position):
-        
+    def jetbot_go_to_waypoints(self, jetbot_position, jetbot_orientation, waypoints_position):
         if self.waypoint_jetbot_index < len(waypoints_position):
             goal_position = waypoints_position[self.waypoint_jetbot_index]
             # print(f"jetbot_position, {jetbot_position}, goal_position: {goal_position}, waypoint_index: {self.waypoint_jetbot_index}")
@@ -380,6 +437,32 @@ class HumanRobotCollaboration(BaseSample):
             is_done = False
         return is_done
 
+    def jackal_go_to_waypoints(self, jackal_position, jackal_orientation, waypoints_position):
+        if self.waypoint_jackal_index < len(waypoints_position):
+            goal_position = waypoints_position[self.waypoint_jackal_index]
+            # print(f"jackal_position, {jackal_position}, goal_position: {goal_position}, waypoint_index: {self.waypoint_jackal_index}")
+            self._jackal.apply_action(self._jackal_controller.forward(start_position=jackal_position,
+                                                                        start_orientation=jackal_orientation,
+                                                                        goal_position=goal_position,
+                                                                        lateral_velocity=7.,
+                                                                        yaw_velocity=0.4))
+            if np.linalg.norm(goal_position - jackal_position) <= 0.5:  # Check if goal reached
+                # print("Reached Goal:", goal_position)
+                self.waypoint_jackal_index += 1
+
+        if self.waypoint_jackal_index == len(waypoints_position):
+            is_done = True
+            goal_position = waypoints_position[-1]
+            # print(f"jackal_position, {jackal_position}, goal_position: {goal_position}, waypoint_index: {self.waypoint_jackal_index}")
+            self._jackal.apply_action(self._jackal_controller.forward(start_position=jackal_position,
+                                                                        start_orientation=jackal_orientation,
+                                                                        goal_position=goal_position,
+                                                                        lateral_velocity=0.,
+                                                                        yaw_velocity=0.))
+        else:
+            is_done = False
+        return is_done
+    
     def fly_to_waypoints(self, crazyflie_position, crazyflie_orientation, waypoints_position):
         goal_yaw_direction = np.array([0., 1., 0.])#self.get_current_b1()
         
