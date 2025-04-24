@@ -3,6 +3,8 @@
 ## Background
 In the pinhole camera model, the camera's intrinsic matrix includes focal lengths $f_x$ and $f_y$, which are typically given in pixel units. These define the scaling from 3D world coordinates to 2D image coordinates. To compute these from physical units, we must convert the focal length from millimeters (mm) to pixels using the sensor size and image resolution.
 
+![Given Parameters in Isaac Sim](img/cam_param.jpg)
+
 ## Given Parameters
 - Focal length: $f = 8.0 \, \text{mm}$
 - Sensor width: $W_{mm} = 20.955 \, \text{mm}$
